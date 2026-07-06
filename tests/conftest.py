@@ -1,7 +1,4 @@
-import logging
-
 import pytest
-import functools
 import socket
 
 import common.common_type as ct
@@ -10,12 +7,7 @@ from utils.util_log import test_log as log
 from common.common_func import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
-from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
-from pymilvus.orm.types import CONSISTENCY_STRONG
-
 timeout = 60
-dimension = 128
-delete_timeout = 60
 
 
 def pytest_addoption(parser):
@@ -45,7 +37,7 @@ def pytest_addoption(parser):
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
-    parser.addoption('--replica_num', type='int', action='store', default=ct.default_replica_num, help="memory replica number")
+    parser.addoption('--replica_num', type=int, action='store', default=ct.default_replica_num, help="memory replica number")
     parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
     parser.addoption('--uri', action='store', default="", help="uri for high level api")
     parser.addoption('--token', action='store', default="", help="token for high level api")
@@ -337,186 +329,4 @@ def check_server_connection(request):
     return connected
 
 
-# @pytest.fixture(scope="session", autouse=True)
-# def change_mutation_result_to_primary_keys():
-#     def insert_future_decorator(func):
-#         @functools.wraps(func)
-#         def change(*args, **kwargs):
-#             try:
-#                 return func(*args, **kwargs).primary_keys
-#             except Exception as e:
-#                 raise e
-#         return change
-#
-#     from pymilvus import MutationFuture
-#     MutationFuture.result = insert_future_decorator(MutationFuture.result)
-#
-#     def insert_decorator(func):
-#         @functools.wraps(func)
-#         def change(*args, **kwargs):
-#             if kwargs.get("_async", False):
-#                 return func(*args, **kwargs)
-#             try:
-#                 return func(*args, **kwargs).primary_keys
-#             except Exception as e:
-#                 raise e
-#         return change
-#     Milvus.insert = insert_decorator(Milvus.insert)
-#     yield
-
-
-@pytest.fixture(scope="module")
-def connect(request):
-    host = request.config.getoption("--host")
-    service_name = request.config.getoption("--service")
-    port = request.config.getoption("--port")
-    http_port = request.config.getoption("--http_port")
-    handler = request.config.getoption("--handler")
-    if handler == "HTTP":
-        port = http_port
-    try:
-        milvus = get_milvus(host=host, port=port, handler=handler)
-        # reset_build_index_threshold(milvus)
-    except Exception as e:
-        logging.getLogger().error(str(e))
-        pytest.exit("Milvus server can not connected, exit pytest ...")
-
-    def fin():
-        try:
-            milvus.close()
-            pass
-        except Exception as e:
-            logging.getLogger().info(str(e))
-
-    request.addfinalizer(fin)
-    return milvus
-
-
-@pytest.fixture(scope="module")
-def dis_connect(request):
-    host = request.config.getoption("--host")
-    service_name = request.config.getoption("--service")
-    port = request.config.getoption("--port")
-    http_port = request.config.getoption("--http_port")
-    handler = request.config.getoption("--handler")
-    if handler == "HTTP":
-        port = http_port
-    milvus = get_milvus(host=host, port=port, handler=handler)
-    milvus.close()
-    return milvus
-
-
-@pytest.fixture(scope="module")
-def args(request):
-    host = request.config.getoption("--host")
-    service_name = request.config.getoption("--service")
-    port = request.config.getoption("--port")
-    http_port = request.config.getoption("--http_port")
-    handler = request.config.getoption("--handler")
-    if handler == "HTTP":
-        port = http_port
-    args = {"ip": host, "port": port, "handler": handler, "service_name": service_name}
-    return args
-
-
-@pytest.fixture(scope="module")
-def milvus(request):
-    host = request.config.getoption("--host")
-    port = request.config.getoption("--port")
-    http_port = request.config.getoption("--http_port")
-    handler = request.config.getoption("--handler")
-    if handler == "HTTP":
-        port = http_port
-    return get_milvus(host=host, port=port, handler=handler)
-
-
-@pytest.fixture(scope="function")
-def collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    log.debug(f'collection_name: {collection_name}')
-    try:
-        default_fields = gen_default_fields()
-        connect.create_collection(collection_name, default_fields, consistency_level=CONSISTENCY_STRONG)
-    except Exception as e:
-        pytest.exit(str(e))
-
-    def teardown():
-        if connect.has_collection(collection_name):
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-# customised id
-@pytest.fixture(scope="function")
-def id_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    log.debug(f'id_collection_name: {collection_name}')
-    try:
-        fields = gen_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
-    except Exception as e:
-        pytest.exit(str(e))
-
-    def teardown():
-        if connect.has_collection(collection_name):
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def binary_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    try:
-        fields = gen_binary_default_fields()
-        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
-    except Exception as e:
-        pytest.exit(str(e))
-
-    def teardown():
-        collection_names = connect.list_collections()
-        if connect.has_collection(collection_name):
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-# customised id
-@pytest.fixture(scope="function")
-def binary_id_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    try:
-        fields = gen_binary_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
-    except Exception as e:
-        pytest.exit(str(e))
-
-    def teardown():
-        if connect.has_collection(collection_name):
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-# for test exit in the future
-# @pytest.hookimpl(hookwrapper=True, tryfirst=True)
-# def pytest_runtest_makereport():
-#     result = yield
-#     report = result.get_result()
-#     if report.outcome == "failed":
-#         msg = "The execution of the test case fails and the test exits..."
-#         log.error(msg)
-#         pytest.exit(msg)
 
